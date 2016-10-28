@@ -31,7 +31,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
 
         #region Private
 
-        internal const decimal BufferLength = 64 * 1024 * 1024; // 32MB
+        internal const decimal BufferLength = 64 * 1024 * 1024; // 64MB
         private const int MaximumBackoffWaitSeconds = 20;
         internal const int MaxBufferDownloadAttemptCount = 8;
 
@@ -108,7 +108,6 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
             // NOTE: We don't validate the download contents for each individual segment because all segments are being downloaded,
             // in parallel, into the same stream. We cannot confirm the size of the data downloaded here. Instead we do it once at the end.
             DownloadSegmentContents();
-            Console.WriteLine("Download finsihed");
         }
 
         /// <summary>
@@ -285,7 +284,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
             // set the current offset in the stream we are reading to the offset
             // that this segment starts at.
             long curOffset = _segmentMetadata.Offset;
-            long LimitLenght = _segmentMetadata.Offset+ _segmentMetadata.Length;
+            long LimitLenght = _segmentMetadata.Offset + _segmentMetadata.Length;
 
             // set the offset of the local file that we are creating to the beginning of the local stream.
             // this value will be used to ensure that we are always reporting the right progress and that,
@@ -296,7 +295,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
 
             // for multi-segment files we append "inprogress" to indicate that the file is not yet ready for use. 
             // This also protects the user from unintentionally using the file after a failed download.
-            //Console.WriteLine("download {0} from offset: {1}",_segmentMetadata.Path,curOffset);
+
             long lengthToDownload = (long)BufferLength;
 
             /**
@@ -324,32 +323,24 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                 t.Join();
             }
            **/
-            List<Task> tasks = new List<Task>();
-            Task t;
+
             for (int i = 0; i < numRequests; i++)
             {
-                
-                    if ((lengthToDownload + curOffset) <= LimitLenght)
-                    {
-                      await  ProcessRequestAsync(curOffset, lengthToDownload);
-                      curOffset += (long)BufferLength;
-                    }
-                    else
-                    {
-                     Console.WriteLine("Lenght to download less than Buffer, offset: {0}, lengthTodownload {1}, buffer is {2},LimitLenght is: {3} at {4}", curOffset, LimitLenght - curOffset, BufferLength, LimitLenght, _segmentMetadata.Path);
-                     await  ProcessRequestAsync(curOffset, LimitLenght - curOffset);
 
-                    }
+                if ((lengthToDownload + curOffset) <= LimitLenght)
+                {
+                    await ProcessRequestAsync(curOffset, lengthToDownload);
+                    curOffset += (long)BufferLength;
+                }
+                else
+                {
+                    Console.WriteLine("Lenght to download less than Buffer, offset: {0}, lengthTodownload {1}, buffer is {2},LimitLenght is: {3} at {4}", curOffset, LimitLenght - curOffset, BufferLength, LimitLenght, _segmentMetadata.Path);
+                    await ProcessRequestAsync(curOffset, LimitLenght - curOffset);
+                }
             }
         }
         private async Task<int> ProcessRequestAsync(long offset, long lengthToDownload)
         {
-            // set the current offset in the stream we are reading to the offset
-            // that this segment starts at.
-           
-            // set the length remaining to ensure that only the exact number of bytes is ultimately downloaded
-            // for this segment.
- 
             // for multi-segment files we append "inprogress" to indicate that the file is not yet ready for use. 
             // This also protects the user from unintentionally using the file after a failed download.
             var streamName = _metadata.SegmentCount > 1 ? string.Format("{0}.inprogress", _metadata.TargetStreamPath) : _metadata.TargetStreamPath;
@@ -357,59 +348,47 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
             {
                 outputStream.Seek(offset, SeekOrigin.Begin);
 
-                    _token.ThrowIfCancellationRequested();
-                    int attemptCount = 0;
-                    int partialDataAttempts = 0;
-                    bool downloadCompleted = false;
-                    long dataReceived = 0;
-                    bool modifyLengthAndOffset = false;
-                    bool ReadStreamCompleted = false;
+                _token.ThrowIfCancellationRequested();
+                int attemptCount = 0;
+                int partialDataAttempts = 0;
+                bool downloadCompleted = false;
+                long dataReceived = 0;
+                bool modifyLengthAndOffset = false;
 
-                if (offset > 1073441955)
-                {
-                    Console.WriteLine("Found exception one in process {0} lendthTodownload {1} attempt {2} at {3}", offset, lengthToDownload,attemptCount, _segmentMetadata.Path);
-                    Console.ReadKey();
-                }
 
                 while (!downloadCompleted && attemptCount < MaxBufferDownloadAttemptCount)
+                {
+                    _token.ThrowIfCancellationRequested();
+                    try
                     {
-                        _token.ThrowIfCancellationRequested();
-                        try
+                        // in the case where we got less than the expected amount of data,
+                        // only download the rest of the data from the previous request
+                        // instead of a new full buffer.
+                        if (modifyLengthAndOffset)
                         {
-                            // in the case where we got less than the expected amount of data,
-                            // only download the rest of the data from the previous request
-                            // instead of a new full buffer.
-                            if (modifyLengthAndOffset)
-                            {
-                                lengthToDownload -= dataReceived;
-                                dataReceived = 0;
-                                Console.WriteLine("process offset {0} to {1} of file {2}, try {3}", offset, lengthToDownload, _segmentMetadata.Path,attemptCount);
-                            }
+                            lengthToDownload -= dataReceived;
+                            dataReceived = 0;
+                            Console.WriteLine("process offset {0} to {1} of file {2}, try {3}", offset, lengthToDownload, _segmentMetadata.Path, attemptCount);
+                        }
 
 
-                        lock (this)
-                            {
-                                //ReadStreamCompleted = ExecuteWithTimeLimit(TimeSpan.FromMilliseconds(1000*550), () =>
-                                //{
+                        using (var readStream = _frontEnd.ReadStream(_metadata.InputFilePath, offset, lengthToDownload, _metadata.IsDownload))
+                        {
 
-                                    using (var readStream = _frontEnd.ReadStream(_metadata.InputFilePath, offset, lengthToDownload, _metadata.IsDownload))
-                                    {
-                                 
-                                        readStream.CopyTo(outputStream, (int)lengthToDownload);
-                                    }
-                                //});
-                            }
+                             readStream.CopyTo(outputStream, (int)lengthToDownload);
 
-                            var lengthReturned = outputStream.Position - offset;
+                        }
 
-                            // if we got more data than we asked for something went wrong and we should retry, since we can't trust the extra data
-                            if (lengthReturned > lengthToDownload)
-                            {
-                                throw new UploadFailedException(string.Format("{4}: Did not download the expected amount of data in the request. Expected: {0}. Actual: {1}. From offset: {2} in remote file: {3}", lengthToDownload, outputStream.Position - offset, offset, _metadata.InputFilePath, DateTime.Now.ToString()));
-                            }
+                        var lengthReturned = outputStream.Position - offset;
+
+                        // if we got more data than we asked for something went wrong and we should retry, since we can't trust the extra data
+                        if (lengthReturned > lengthToDownload)
+                        {
+                            throw new UploadFailedException(string.Format("{4}: Did not download the expected amount of data in the request. Expected: {0}. Actual: {1}. From offset: {2} in remote file: {3}", lengthToDownload, outputStream.Position - offset, offset, _metadata.InputFilePath, DateTime.Now.ToString()));
+                        }
 
                         // we need to validate how many bytes have actually been copied to the read stream
-                        if ((lengthReturned>0)&&(lengthReturned < lengthToDownload) && ((offset + lengthReturned) < (_segmentMetadata.Offset + _segmentMetadata.Length)))
+                        if ((lengthReturned > 0) && (lengthReturned < lengthToDownload) && ((offset + lengthReturned) < (_segmentMetadata.Offset + _segmentMetadata.Length)))
                         {
                             Console.WriteLine("Downloaded UNEXPECTED Lenght {0} Expected: {1} of file {2} offsite is {3}", lengthReturned, lengthToDownload, _segmentMetadata.Path, offset);
                             partialDataAttempts++;
@@ -430,11 +409,6 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
 
                             WaitForRetry(partialDataAttempts, this.UseBackOffRetryStrategy, _token);
                         }
-                        //else if (!ReadStreamCompleted)
-                        //{
-                        //    ReportProgress(localOffset, false);
-                        //    throw new Exception("Time out to read stream, do retry");
-                        //}
                         else
                         {
                             downloadCompleted = true;
@@ -442,37 +416,31 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                             localOffset += lengthToDownload;
                             ReportProgress(localOffset, false);
                         }
-                        }
-                        catch (Exception ex)
-                        {
-                            // update counts and reset for internal attempts
-                            attemptCount++;
-                            partialDataAttempts = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        // update counts and reset for internal attempts
+                        attemptCount++;
+                        partialDataAttempts = 0;
                         Console.WriteLine("Throw exception, when expected to download: {0} of file {1} offsite is {2}, LimiteLength is:{3} modify offset lenght {4}", lengthToDownload, _segmentMetadata.Path, offset, _segmentMetadata.Offset + _segmentMetadata.Length, modifyLengthAndOffset);
                         Console.WriteLine(ex.ToString());
                         //if we tried more than the number of times we were allowed to, give up and throw the exception
                         if (attemptCount >= MaxBufferDownloadAttemptCount)
-                            {
-                                ReportProgress(localOffset, true);
-                            Console.WriteLine("Throw exception, when expected to download: {0} of file {1} offsite is {2}, LimiteLength is:{3} modify offset lenght {4}",  lengthToDownload, _segmentMetadata.Path, offset, _segmentMetadata.Offset + _segmentMetadata.Length, modifyLengthAndOffset);
+                        {
+                            ReportProgress(localOffset, true);
+                            Console.WriteLine("Throw exception, when expected to download: {0} of file {1} offsite is {2}, LimiteLength is:{3} modify offset lenght {4}", lengthToDownload, _segmentMetadata.Path, offset, _segmentMetadata.Offset + _segmentMetadata.Length, modifyLengthAndOffset);
                             throw ex;
-                            }
-                            else
-                            {
-                                WaitForRetry(attemptCount, this.UseBackOffRetryStrategy, _token);
+                        }
+                        else
+                        {
+                            WaitForRetry(attemptCount, this.UseBackOffRetryStrategy, _token);
 
-                                // forcibly put the stream back to where it should be based on where we think we are in the download.
-                                outputStream.Seek(offset, SeekOrigin.Begin);
-                            }
+                            // forcibly put the stream back to where it should be based on where we think we are in the download.
+                            outputStream.Seek(offset, SeekOrigin.Begin);
                         }
                     }
-                
-
-                //// full validation of the segment.
-                //if (outputStream.Position - _segmentMetadata.Offset != _segmentMetadata.Length)
-                //{
-                //    throw new UploadFailedException(string.Format("Post-download stream segment verification failed for file {2}: target stream has a length of {0}, expected {1}. This usually indicates repeateded server-side throttling due to exceeding account bandwidth.", outputStream.Position - _segmentMetadata.Offset, _segmentMetadata.Length, _segmentMetadata.Path));
-                //}
+                }
+               
             }
             return 1;
         }

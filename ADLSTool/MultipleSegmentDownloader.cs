@@ -114,12 +114,18 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                 t.Join();
             }
             **/
+            //List<Task> tasks = new List<Task>();
+            //for (int i = 0; i < threadCount; i++)
+            //{
+            //     Task t = Task.Run(() =>
+            //     {
+                    await ProcessPendingSegments(pendingSegments, exceptions);
+            //     });
 
-            for (int i = 0; i < threadCount; i++)
-            {
-                 await ProcessPendingSegments(pendingSegments, exceptions);
-            }
+            //    tasks.Add(t);
+            //}
 
+            //await Task.WhenAll(tasks.ToArray());
             // aggregate any exceptions and throw them back at our caller
             if (exceptions.Count > 0 && !_token.IsCancellationRequested)
             {
@@ -199,7 +205,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
             try
             {
                 segmentDownloader.Download();
-                
+                Console.WriteLine("Download all segments done at thread {0}", Thread.CurrentThread.ManagedThreadId);
                 //if we reach this point, the download was successful; mark it as such 
                 UpdateSegmentMetadataStatus(metadata, segmentNumber, SegmentUploadStatus.Complete);
             }

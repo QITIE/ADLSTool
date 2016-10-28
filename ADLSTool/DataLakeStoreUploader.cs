@@ -201,7 +201,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                         for (int i = 0; i < threadCount; i++)
                         {
                             var t = new Thread(() => {
-                            //Task t = Task.Run(() => {
+                             //Task t = Task.Run(() => {
                                 UploadMetadata file;
                                 while (allFiles.TryDequeue(out file))
                                 {                                  
@@ -315,7 +315,7 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                                     }
 
                                     // sleep for two seconds between checks to save just to keep this thread from using too many cycles.
-                                    Thread.Sleep(2000);
+                                    //Thread.Sleep(2000);
                                 }
                                 catch (OperationCanceledException ex)
                                 {
@@ -987,8 +987,8 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
                     msu.Download();
 
                     //concatenate the files at the end
-                    ConcatenateSegments(metadata);
-                    
+                    ConcatenateSegments(metadata);     
+                                                 
                 }
                 else
                 {
@@ -1015,7 +1015,6 @@ namespace Microsoft.Azure.Management.DataLake.StoreUploader
             {
                 // do nothing since we have already marked everything as failed
             }
-
         }
 
         /// <summary>
